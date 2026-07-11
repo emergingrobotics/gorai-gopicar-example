@@ -46,6 +46,11 @@ func (c *Component) Start(ctx context.Context) error {
 	if err := c.registerSchemas(ctx); err != nil {
 		c.log.Warn("schema registration failed", "err", err)
 	}
+	// Channels are the authoritative discovery surface for the gorai-mcp bridge;
+	// without them the robot is invisible even with schemas registered (DESIGN 9).
+	if err := c.registerChannels(ctx); err != nil {
+		c.log.Warn("channel registration failed", "err", err)
+	}
 	if err := ensureAuditStream(c.nc, c.robotID); err != nil {
 		c.log.Warn("audit stream setup failed", "err", err)
 	}
