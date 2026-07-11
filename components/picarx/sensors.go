@@ -12,7 +12,7 @@ import (
 func (c *Component) startSensors(ctx context.Context) {
 	// Streaming sensors: read at cadence, publish JSON to <cap>.data.
 	go c.streamLoop(ctx, "battery", time.Second, c.batteryPayload)
-	go c.streamLoop(ctx, "distance", 100*time.Millisecond, c.distancePayload)
+	go c.distanceLoop(ctx) // distance also feeds the proximity stop interlock
 	go c.streamLoop(ctx, "grayscale", 100*time.Millisecond, c.grayscalePayload)
 	go c.streamLoop(ctx, "line", 100*time.Millisecond, c.linePayload)
 
@@ -44,6 +44,35 @@ func (c *Component) streamLoop(ctx context.Context, capability string, period ti
 		case <-t.C:
 			if b, err := json.Marshal(fn(ctx)); err == nil {
 				_ = c.nc.Publish(subject, b)
+			}
+		}
+	}
+}
+
+// distanceLoop reads the forward ultrasonic once per tick, publishes it to
+// distance.data, and feeds the proximity stop interlock (a single read, so the
+// slow sensor is not polled twice). On a rising edge into the stop zone it also
+// publishes a proximity event.
+func (c *Component) distanceLoop(ctx context.Context) {
+	dataSubj := c.subj.ComponentData("distance")
+	t := time.NewTicker(100 * time.Millisecond)
+	defer t.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-t.C:
+			cm, err := c.ctl.dev.Distance(ctx, 30*time.Millisecond)
+			if err != nil {
+				continue
+			}
+			if b, err := json.Marshal(map[string]any{"cm": cm}); err == nil {
+				_ = c.nc.Publish(dataSubj, b)
+			}
+			if c.ctl.updateProximity(ctx, cm) {
+				payload, _ := json.Marshal(map[string]any{"obstacle": true, "cm": cm, "ts": time.Now().UTC().Format(time.RFC3339)})
+				_ = c.nc.Publish(c.subj.ComponentEvent("proximity"), payload)
+				c.log.Warn("proximity stop: obstacle within threshold", "cm", cm)
 			}
 		}
 	}

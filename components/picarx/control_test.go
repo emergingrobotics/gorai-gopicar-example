@@ -126,6 +126,39 @@ func TestCliffInterlock(t *testing.T) {
 	}
 }
 
+// A forward obstacle within proximityStopCM stops and blocks forward; reverse is
+// allowed to back away; forward re-enables only after the path is stably clear.
+func TestProximityInterlock(t *testing.T) {
+	d := &stubDev{}
+	c := newController(d, testLim, [3]int{}, time.Now)
+	if c.updateProximity(context.Background(), 30) {
+		t.Fatalf("far reading must not fire")
+	}
+	if r := c.drive(context.Background(), 20); r["ok"] != true {
+		t.Fatalf("drive with clear path should succeed, got %v", r)
+	}
+	if !c.updateProximity(context.Background(), 3) || d.stop < 1 {
+		t.Fatalf("close reading must fire+Stop, stop=%d", d.stop)
+	}
+	if r := c.drive(context.Background(), 20); r["error"] != "obstacle_blocked" {
+		t.Fatalf("forward near obstacle must fail obstacle_blocked, got %v", r)
+	}
+	if r := c.drive(context.Background(), -20); r["ok"] != true {
+		t.Fatalf("reverse away from obstacle must succeed, got %v", r)
+	}
+	// A single clear reading (incl. -1 no-echo) must not re-enable forward (debounce).
+	c.updateProximity(context.Background(), -1)
+	if r := c.drive(context.Background(), 20); r["error"] != "obstacle_blocked" {
+		t.Fatalf("one clear reading must not re-enable forward, got %v", r)
+	}
+	for i := 0; i < cliffClearPolls; i++ {
+		c.updateProximity(context.Background(), 30)
+	}
+	if r := c.drive(context.Background(), 20); r["ok"] != true {
+		t.Fatalf("forward should resume after path stably clear, got %v", r)
+	}
+}
+
 // C-003: watchdog stops the car when no fresh drive arrives within the window.
 func TestWatchdog(t *testing.T) {
 	d := &stubDev{}

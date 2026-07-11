@@ -44,19 +44,25 @@ type controller struct {
 	clock   func() time.Time
 	window  time.Duration
 
-	mu         sync.Mutex
-	estopped   bool
-	cliff      bool
-	cliffClear int // consecutive clear readings; cliff clears after cliffClearPolls
-	moving     bool
-	lastDrive  time.Time
+	mu            sync.Mutex
+	estopped      bool
+	cliff         bool
+	cliffClear    int // consecutive clear cliff readings; cliff clears after cliffClearPolls
+	obstacle      bool
+	obstacleClear int // consecutive clear distance readings; obstacle clears after cliffClearPolls
+	moving        bool
+	lastDrive     time.Time
 }
 
-// cliffClearPolls is how many consecutive clear cliff readings are required
-// before forward drive is re-enabled. At the ~100ms cliff poll this debounces a
-// reading that flickers while the car teeters at an edge, which would otherwise
-// briefly re-allow forward and let the car inch over. C-004.
+// cliffClearPolls is how many consecutive clear readings are required before
+// forward drive is re-enabled after a cliff or proximity stop. At the ~100ms
+// poll this debounces a reading that flickers at an edge or near an obstacle,
+// which would otherwise briefly re-allow forward and let the car creep on. C-004.
 const cliffClearPolls = 3
+
+// proximityStopCM is the forward-obstacle threshold: a distance reading below
+// this (and non-negative; -1 means no echo) stops the car and blocks forward.
+const proximityStopCM = 5.0
 
 func newController(dev Device, lim Limits, grayRef [3]int, clock func() time.Time) *controller {
 	return &controller{dev: dev, lim: lim, grayRef: grayRef, clock: clock, window: 500 * time.Millisecond}
@@ -91,6 +97,11 @@ func (c *controller) drive(ctx context.Context, throttle float64) map[string]any
 		c.moving = false
 		_ = c.dev.Stop(ctx)
 		return failResp("cliff_blocked", "cliff detected; forward blocked — reverse to back away")
+	}
+	if c.obstacle && clamped > c.lim.DriveDeadband {
+		c.moving = false
+		_ = c.dev.Stop(ctx)
+		return failResp("obstacle_blocked", "obstacle within 5cm; forward blocked — reverse to back away")
 	}
 	var err error
 	switch {
@@ -175,6 +186,32 @@ func (c *controller) updateCliff(ctx context.Context, detected bool) bool {
 		if c.cliffClear >= cliffClearPolls {
 			c.cliff = false
 			c.cliffClear = 0
+		}
+	}
+	return rising
+}
+
+// updateProximity records the latest forward distance (cm; <0 means no echo) and
+// returns true on a rising edge into the stop zone (which stops the motors). Like
+// the cliff interlock it latches and clears only after cliffClearPolls consecutive
+// clear readings, so a flickering reading near an obstacle cannot re-allow forward.
+func (c *controller) updateProximity(ctx context.Context, cm float64) bool {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tooClose := cm >= 0 && cm < proximityStopCM
+	rising := tooClose && !c.obstacle
+	if tooClose {
+		c.obstacle = true
+		c.obstacleClear = 0
+		if rising {
+			c.moving = false
+			_ = c.dev.Stop(ctx)
+		}
+	} else if c.obstacle {
+		c.obstacleClear++
+		if c.obstacleClear >= cliffClearPolls {
+			c.obstacle = false
+			c.obstacleClear = 0
 		}
 	}
 	return rising

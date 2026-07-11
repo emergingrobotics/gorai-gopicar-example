@@ -72,10 +72,18 @@ function setEstop(on) {
   if (on) { el("throttle").value = 0; el("steer").value = 0; }
   post("estop", on ? 0 : 1);
   const b = el("stop");
-  b.textContent = on ? "CLEAR E-STOP" : "STOP";
+  // The button both fires the e-stop and shows whether it is engaged.
+  b.textContent = on ? "⚠ E-STOP ENGAGED — click to clear" : "EMERGENCY STOP  (or press X)";
   b.classList.toggle("engaged", on);
 }
 el("stop").addEventListener("click", () => setEstop(!estopped));
+
+// Soft stop: cut the throttle cruise and stop the motors, WITHOUT latching
+// (unlike e-stop) — you can drive again immediately. Leaves steering as-is.
+function softStop() {
+  held = {};
+  apply("drive", 0);
+}
 
 // Quit: stop the whole robot process from the GUI (graceful shutdown -> motors
 // stopped, camera released). Confirmed so it can't fire by accident.
@@ -93,15 +101,17 @@ el("quit").addEventListener("click", () => {
 //   Shift + Arrow Up/Down    camera tilt up/down      (steps and holds)
 //   Shift + Arrow Left/Right camera pan left/right    (steps and holds)
 //   C                        centre the camera (pan + tilt to 0)
-//   Space                    stop motors (e-stop)
+//   Space                    stop the motors (no latch — drive again right away)
+//   X                        e-stop (latches; clear with the on-screen button)
 //   W/A/S/D                  mirror the arrows for throttle/steer (R-136)
 const VKEYS = { ArrowUp: 1, ArrowDown: -1, w: 1, s: -1 };          // throttle / tilt axis
 const HKEYS = { ArrowLeft: -1, ArrowRight: 1, a: -1, d: 1 };       // steer / pan axis
 
 addEventListener("keydown", (e) => {
-  if (e.key === " ") { e.preventDefault(); setEstop(true); return; }
+  if (e.key === " ") { e.preventDefault(); softStop(); return; }
 
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (key === "x") { e.preventDefault(); setEstop(true); return; }
   if (key === "c") { e.preventDefault(); apply("campan", 0); apply("camtilt", 0); return; }
 
   const v = VKEYS[key];
@@ -141,7 +151,15 @@ ws.onmessage = (ev) => {
   const d = JSON.parse(ev.data);
   const set = (id, v) => { const e = el(id); if (v !== undefined) e.textContent = v; };
   if (d.cap === "battery") set("battery", d.volts?.toFixed?.(2));
-  if (d.cap === "distance") set("distance", d.cm);
+  if (d.cap === "distance") {
+    set("distance", d.cm);
+    // Obstacle within the stop zone: kill the cruise throttle so it doesn't keep
+    // driving into it. The component refuses forward until clear; reverse is fine.
+    if (typeof d.cm === "number" && d.cm >= 0 && d.cm < 5 && +el("throttle").value > 0) {
+      apply("drive", 0);
+      setStatus("obstacle <5cm — throttle zeroed; reverse to back away", true);
+    }
+  }
   if (d.cap === "grayscale") set("grayscale", (d.adc || []).join(","));
   if (d.cap === "line") set("line", (d.line || []).join(","));
   if (d.cap === "cliff") {
