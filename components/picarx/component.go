@@ -40,13 +40,14 @@ type Component struct {
 	subj     *subjects.Builder
 	px       *gopx.PiCarX
 	ctl      *controller
-	grayRef  [3]int
+	grayRef  [3]int // line-detection threshold (per channel)
+	cliffRef [3]int // cliff/edge threshold (per channel), separate from and lower than grayRef
 	cancel   context.CancelFunc
 	subs     []*nats.Subscription
 	stopOnce sync.Once
 }
 
-func parseConfig(conf registry.Config) (Limits, [3]int, string, time.Duration) {
+func parseConfig(conf registry.Config) (Limits, [3]int, [3]int, string, time.Duration) {
 	num := func(key string, def float64) float64 {
 		if v, ok := conf[key].(float64); ok {
 			return v
@@ -60,17 +61,27 @@ func parseConfig(conf registry.Config) (Limits, [3]int, string, time.Duration) {
 		DriveDeadband:   num("deadband", defaultDeadband),
 		ProximityStopCM: num("proximity_stop_cm", defaultProximityCM),
 	}
-	var ref [3]int
-	if raw, ok := conf["grayscale_ref"].([]any); ok && len(raw) == 3 {
-		for i := 0; i < 3; i++ {
-			if f, ok := raw[i].(float64); ok {
-				ref[i] = int(f)
-			}
-		}
-	}
+	grayRef := parseRef(conf, "grayscale_ref", [3]int{})
+	cliffRef := parseRef(conf, "cliff_ref", [3]int{50, 50, 50})
 	calib, _ := conf["calibration"].(string)
 	win := time.Duration(num("watchdog_ms", defaultWatchdogMS)) * time.Millisecond
-	return lim, ref, calib, win
+	return lim, grayRef, cliffRef, calib, win
+}
+
+// parseRef reads a 3-element integer array attribute (e.g. grayscale_ref), or
+// returns def if it is absent or malformed.
+func parseRef(conf registry.Config, key string, def [3]int) [3]int {
+	raw, ok := conf[key].([]any)
+	if !ok || len(raw) != 3 {
+		return def
+	}
+	var r [3]int
+	for i := 0; i < 3; i++ {
+		if f, ok := raw[i].(float64); ok {
+			r[i] = int(f)
+		}
+	}
+	return r
 }
 
 // loadCalibration reads a picarx.Calibration JSON file; empty path -> Measured.
@@ -99,7 +110,7 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 	}
 	log := getLogger(deps)
 
-	lim, ref, calibPath, win := parseConfig(conf)
+	lim, grayRef, cliffRef, calibPath, win := parseConfig(conf)
 	calib, err := loadCalibration(calibPath)
 	if err != nil {
 		return nil, err
@@ -108,18 +119,19 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 	if err != nil {
 		return nil, fmt.Errorf("open picarx: %w", err)
 	}
-	ctl := newController(px, lim, ref, time.Now)
+	ctl := newController(px, lim, grayRef, time.Now)
 	ctl.window = win
 
 	comp := &Component{
-		name:    resource.NewComponentName("gorai", "picarx", name),
-		nc:      nc,
-		log:     log,
-		robotID: robotID,
-		subj:    subjects.NewBuilder(robotID),
-		px:      px,
-		ctl:     ctl,
-		grayRef: ref,
+		name:     resource.NewComponentName("gorai", "picarx", name),
+		nc:       nc,
+		log:      log,
+		robotID:  robotID,
+		subj:     subjects.NewBuilder(robotID),
+		px:       px,
+		ctl:      ctl,
+		grayRef:  grayRef,
+		cliffRef: cliffRef,
 	}
 	comp.installExitHandler()
 	return comp, nil

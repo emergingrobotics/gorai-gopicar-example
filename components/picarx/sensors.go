@@ -143,7 +143,7 @@ func (c *Component) proximityPayload(ctx context.Context) map[string]any {
 }
 
 func (c *Component) cliffPayload(ctx context.Context) map[string]any {
-	b, err := c.ctl.dev.CliffStatus(ctx, c.grayRef)
+	b, err := c.ctl.dev.CliffStatus(ctx, c.cliffRef)
 	if err != nil {
 		return map[string]any{"error": err.Error()}
 	}

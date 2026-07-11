@@ -136,7 +136,7 @@ func (c *Component) cliffLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-t.C:
-			detected, err := c.ctl.dev.CliffStatus(ctx, c.grayRef)
+			detected, err := c.ctl.dev.CliffStatus(ctx, c.cliffRef)
 			if err != nil {
 				continue
 			}

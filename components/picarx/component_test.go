@@ -11,9 +11,10 @@ import (
 )
 
 func TestParseConfigDefaultsAndOverrides(t *testing.T) {
-	lim, ref, calib, win := parseConfig(map[string]any{
+	lim, ref, cliffRef, calib, win := parseConfig(map[string]any{
 		"steer_max_deg": float64(25),
 		"grayscale_ref": []any{float64(900), float64(950), float64(1000)},
+		"cliff_ref":     []any{float64(40), float64(45), float64(50)},
 		"calibration":   "calib.json",
 		"watchdog_ms":   float64(400),
 	})
@@ -25,6 +26,9 @@ func TestParseConfigDefaultsAndOverrides(t *testing.T) {
 	}
 	if ref != [3]int{900, 950, 1000} {
 		t.Fatalf("grayscale ref: %v", ref)
+	}
+	if cliffRef != [3]int{40, 45, 50} {
+		t.Fatalf("cliff ref: %v", cliffRef)
 	}
 	if calib != "calib.json" {
 		t.Fatalf("calibration path: %v", calib)
