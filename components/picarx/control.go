@@ -159,9 +159,12 @@ func (c *controller) camtilt(ctx context.Context, angle float64) map[string]any 
 	return c.servo(ctx, angle, c.lim.CamTiltMaxDeg, c.dev.SetCamTilt)
 }
 
-// spin rotates the car in place (rate>0 right, <0 left), overriding any drive so
-// it works even while moving. Watchdog-protected like drive. Refused while
-// e-stopped. C-002 clamps the rate.
+// spin rotates the car (rate>0 right, <0 left), overriding any drive so it works
+// even while moving. It is a steering-assisted pivot: the front wheels turn to
+// full lock in the spin direction (an Ackermann axle can't skid sideways in
+// place, so pointing the wheels lets them roll into the rotation) while the rear
+// motors drive differentially. rate 0 re-centres the steering and stops.
+// Watchdog-protected like drive; refused while e-stopped. C-002 clamps the rate.
 func (c *controller) spin(ctx context.Context, rate float64) map[string]any {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -169,6 +172,16 @@ func (c *controller) spin(ctx context.Context, rate float64) map[string]any {
 		return failResp("estop_latched", "e-stop engaged; send estop.command {clear:true}")
 	}
 	r := clamp(rate, -100, 100)
+	steer := 0.0
+	switch {
+	case r > 0:
+		steer = c.lim.SteerMaxDeg
+	case r < 0:
+		steer = -c.lim.SteerMaxDeg
+	}
+	if err := c.dev.SetDir(ctx, steer); err != nil {
+		return failResp("mcu_unavailable", err.Error())
+	}
 	if err := c.dev.Spin(ctx, r); err != nil {
 		return failResp("mcu_unavailable", err.Error())
 	}

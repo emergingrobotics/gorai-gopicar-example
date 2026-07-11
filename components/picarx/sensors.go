@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -90,12 +91,27 @@ func (c *Component) serveState(capability string, fn func(context.Context) map[s
 	}
 }
 
+// batteryVoltageSamples is how many raw reads are medianed per reported value.
+// A single 12-bit ADC sample is noisy and the ×3 battery divider amplifies it, so
+// an odd-count median rejects the spikes that make the reading jump around.
+const batteryVoltageSamples = 5
+
 func (c *Component) batteryPayload(ctx context.Context) map[string]any {
-	v, err := c.ctl.dev.Battery(ctx)
-	if err != nil {
-		return map[string]any{"error": err.Error()}
+	vs := make([]float64, 0, batteryVoltageSamples)
+	var lastErr error
+	for i := 0; i < batteryVoltageSamples; i++ {
+		v, err := c.ctl.dev.Battery(ctx)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		vs = append(vs, v)
 	}
-	return map[string]any{"volts": v}
+	if len(vs) == 0 {
+		return map[string]any{"error": lastErr.Error()}
+	}
+	sort.Float64s(vs)
+	return map[string]any{"volts": vs[len(vs)/2]}
 }
 
 func (c *Component) distancePayload(ctx context.Context) map[string]any {

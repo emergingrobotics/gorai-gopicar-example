@@ -165,11 +165,22 @@ func TestProximityInterlock(t *testing.T) {
 func TestSpin(t *testing.T) {
 	d := &stubDev{}
 	c := newController(d, testLim, [3]int{}, time.Now)
-	if r := c.spin(context.Background(), 60); r["ok"] != true || d.spin != 1 || d.lastSpin != 60 {
-		t.Fatalf("spin right: resp=%v spin=%d last=%v", r, d.spin, d.lastSpin)
+	// spin right: full RIGHT steer lock + differential rear.
+	if r := c.spin(context.Background(), 60); r["ok"] != true || d.lastSpin != 60 || d.lastDir != testLim.SteerMaxDeg {
+		t.Fatalf("spin right: resp=%v spin=%v dir=%v", r, d.lastSpin, d.lastDir)
+	}
+	// spin left: full LEFT steer lock.
+	c.spin(context.Background(), -60)
+	if d.lastSpin != -60 || d.lastDir != -testLim.SteerMaxDeg {
+		t.Fatalf("spin left: spin=%v dir=%v", d.lastSpin, d.lastDir)
 	}
 	if r := c.spin(context.Background(), 200); r["clamped"] != 100.0 || d.lastSpin != 100 {
 		t.Fatalf("spin must clamp to 100, resp=%v last=%v", r, d.lastSpin)
+	}
+	// stop re-centres the steering.
+	c.spin(context.Background(), 0)
+	if d.lastDir != 0 {
+		t.Fatalf("spin 0 must centre steering, dir=%v", d.lastDir)
 	}
 	c.estop(context.Background(), false)
 	if r := c.spin(context.Background(), 60); r["error"] != "estop_latched" {

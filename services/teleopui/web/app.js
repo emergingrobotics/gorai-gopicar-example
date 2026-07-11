@@ -88,15 +88,18 @@ function softStop() {
 // Spin in place (differential): dir +1 = right, -1 = left. Overrides driving —
 // suspends the throttle cruise so it can't fight the spin — and is kept alive by
 // the watchdog loop while the key is held. Stops on release.
-const SPIN_RATE = 60;
+const SPIN_RATE = 80;
 function startSpin(dir) {
   delete held.drive;          // suspend forward cruise; spin drives the motors itself
+  delete held.steer;          // the pivot owns the steering while spinning
   el("throttle").value = 0;   // reflect that drive is suspended
+  el("steer").value = dir > 0 ? +el("steer").max : +el("steer").min; // full lock into the turn
   held.spin = dir * SPIN_RATE;
   post("spin", held.spin);
 }
 function stopSpin() {
   delete held.spin;
+  el("steer").value = 0;      // server re-centres steering on spin 0; keep slider in sync
   post("spin", 0);
 }
 
