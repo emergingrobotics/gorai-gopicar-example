@@ -1,8 +1,10 @@
-//go:build v4l2
+//go:build v4l2 && !rpicam
 
-// Package camera's real capture source, backed by gorai's V4L2 camera component.
-// Built only with -tags v4l2 (on the Pi); the host build and tests use the fake
-// source, so this file never touches hardware off-target.
+// Package camera's real capture source for USB/UVC webcams, backed by gorai's
+// V4L2 camera component. Built only with -tags v4l2 (on the Pi); the host build
+// and tests use the fake source, so this file never touches hardware off-target.
+// For Raspberry Pi CSI cameras (e.g. PiCam/OV5647) use -tags rpicam instead --
+// the two sources are mutually exclusive, and rpicam wins if both are set.
 package camera
 
 import (

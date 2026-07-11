@@ -1,9 +1,15 @@
 # Requirements: `gorai-picarx` Teleoperable Robot
 
-**Version:** 1.0
-**Date:** 2026-07-10
+**Version:** 1.1
+**Date:** 2026-07-11
 **Status:** Draft
 **Robot ID:** `picarx`
+
+> **Revision 1.1 (2026-07-11):** RTSP video output **removed** (R-123 withdrawn; video
+> is now the two paths in-page MJPEG + NATS frames). Documented the build-tag-selected
+> camera capture sources (`rpicam` for Pi CSI cameras, `v4l2` for USB/UVC) and the fact
+> that the robot runs from its **locally built binary**, not the stock `gorai run`,
+> because it contains custom components. See R-104, R-105, R-120, and §7.
 
 > **North star: [VISION.md](VISION.md).** This document is the authoritative, detailed
 > requirement set that implements the vision. Where this document and `VISION.md` disagree,
@@ -17,17 +23,18 @@ Requirements are numbered for traceability. Design elements and code cite these 
 
 ## 1. Scope
 
-A single GoRAI binary running `gorai run robot.json` on the Raspberry Pi inside a
-SunFounder PiCar-X. It exposes the car's sensors as NCP resources and its actuators as NCP
-tools over an embedded NATS mesh, serves one embedded web control page (video + telemetry
-+ drive controls), streams live video three ways (in-page MJPEG, NATS frames, RTSP), and
-exposes the NATS bus on the LAN for other agents. Built from the `gorai-robot-template`
-layout; motion/sensors via the [`gopicar`](../gopicar) driver; video via a GoRAI `camera`
-component reading the Pi camera.
+A single GoRAI binary running on the Raspberry Pi inside a SunFounder PiCar-X. It exposes
+the car's sensors as NCP resources and its actuators as NCP tools over an embedded NATS
+mesh, serves one embedded web control page (video + telemetry + drive controls), streams
+live video two ways (in-page MJPEG, NATS frames), and exposes the NATS bus on the LAN for
+other agents. Built from the `gorai-robot-template` layout; motion/sensors via the
+[`gopicar`](../gopicar) driver; video via a GoRAI `camera` component reading the Pi camera.
+Because the robot contains custom components, it runs from its **own compiled binary**
+(`bin/picarx`), not the stock `gorai run` (see R-104).
 
 ### 1.1 In scope
 - NCP capability surface for all `gopicar` sensors and actuators.
-- Live camera video: in-page, over NATS, and over RTSP.
+- Live camera video: in-page (MJPEG) and over NATS.
 - Embedded web teleop UI: sliders **and** keyboard, with a video panel.
 - LAN-exposed NATS bus with credentialed access.
 - Safety enforcement at the capability nodes (clamp, watchdog, e-stop, cliff interlock).
@@ -37,7 +44,9 @@ component reading the Pi camera.
 - Autonomous behaviors (line-follow, obstacle-avoid) — the tools they would call exist,
   but no agent is shipped.
 - WebRTC in-page video (MJPEG is the v1 in-page path).
-- Hardware/software H.264 encoding for RTSP (v1 RTSP is RTP/JPEG — see R-123).
+- **RTSP output of any kind** (RTP/JPEG or H.264). Withdrawn in v1.1: it added a
+  version-pinned dependency (`gortsplib`) for a path no in-scope consumer used, and is
+  not natively browser-playable. External viewers consume the NATS frame stream instead.
 - Composite Robot / runtime discovery (the switch exists but defaults off).
 - Persisting raw video frames in the audit stream.
 
@@ -54,6 +63,16 @@ component reading the Pi camera.
   `registry.RegisterComponent` / the service registry; `main.go` blank imports MUST be the
   only manifest.
 - **R-103** The binary MUST cross-compile to `linux/arm64` for the Raspberry Pi.
+- **R-104** The robot MUST be run from the project's **own compiled binary** (`bin/picarx`),
+  produced by `gorai build` / `make build`, **not** the stock `gorai run`. Rationale: the
+  stock `gorai` binary contains only the framework's built-in components; the custom
+  `picarx`, `picam`, and `teleop-ui` types self-register (R-102) only inside a binary
+  compiled from *this* module. Running `gorai run robot.json` therefore fails with
+  `type … not found in registry`. `make run` MUST build then exec `./bin/<name> run …`.
+- **R-105** The hardware-facing capture backend MUST be selected at build time via a Go
+  **build tag**, so host builds and tests use a hardware-free fake source and never link
+  platform code. The build system MUST pass the tag through (`gorai build --tags <tags>`,
+  surfaced as `make ... TAGS=<tags>`; default `rpicam`). See R-120 for the camera sources.
 
 ### 2.2 `picarx` capability component (wraps `gopicar`)
 - **R-110** The component MUST wrap `gopicar` `pkg/picarx` and open the device once at
@@ -85,23 +104,32 @@ component reading the Pi camera.
   performed **in the component handler** (R-150), and schema registration serves discovery.
 
 ### 2.3 `camera` capability component (Pi camera)
-- **R-120** A `camera` component MUST capture the Pi camera (wrapping GoRAI's `camera/v4l2`
-  capture or equivalent), JPEG-encode frames, and publish them as the NCP resource
-  `gorai.picarx.front.data` (concrete `gorai.<robot>.<capability>.<type>` form; see
-  DESIGN §11 R3/R7).
+- **R-120** A `camera` component (model `picam`) MUST capture the Pi camera, JPEG-encode
+  frames, and publish them as the NCP resource `gorai.picarx.front.data` (concrete
+  `gorai.<robot>.<capability>.<type>` form; see DESIGN §11 R3/R7). The capture backend is
+  build-tag-selected (R-105) via a `sourceFactory` swapped in each source file's `init()`:
+  - **R-120.1** `-tags rpicam` (**default** for this robot) MUST capture via the Raspberry
+    Pi camera stack by driving `rpicam-vid --codec mjpeg` and splitting its MJPEG output
+    into frames. This is REQUIRED for CSI cameras (e.g. the OV5647 PiCam) on a Raspberry
+    Pi 5, where `/dev/video0` is the raw CFE (`rp1-cfe`) and cannot be streamed as a plain
+    V4L2 device — `VIDIOC_STREAMON` returns `EINVAL` because capture must traverse the
+    libcamera media pipeline (CFE → ISP debayer). See §7.
+  - **R-120.2** `-tags v4l2` MUST capture a USB/UVC webcam via GoRAI's `camera/v4l2`
+    component. It MUST NOT be used for Pi CSI cameras on Pi 5.
+  - **R-120.3** The two tags are mutually exclusive; if both are set, `rpicam` MUST win
+    (enforced by the `//go:build v4l2 && !rpicam` constraint) so exactly one `init()`
+    installs the `sourceFactory`. A build with neither tag MUST fail loudly at start
+    ("no camera source compiled in"), never silently no-op.
 - **R-121** `camera.front` MUST expose metadata on `…camera.front.state` (resolution,
   encoding, frame rate) and MUST report `SupportsPTZ` truthfully (the gimbal is a separate
   `picarx` tool, not driven by this component).
 - **R-122** The NATS frame stream MUST be rate- and resolution-limited (default target
   ~10–15 fps at a modest resolution) to protect Wi-Fi and CPU.
-- **R-123** The component MUST additionally serve an **RTSP** stream for external viewers,
-  from an RTSP endpoint embedded in the same binary (default `:8554`, path `/front`), using
-  a pure-Go RTSP server. The stream MUST use **RTP/JPEG (RFC 2435)**, reusing the same JPEG
-  frames as the NATS/MJPEG paths — no additional encoder and no second capture (see R-124).
-  RTSP is a stream endpoint, not a separate web application. Hardware-encoded H.264 over
-  RTSP is a future optimization and is out of scope for this version.
-- **R-124** The single physical capture MUST feed all three consumers (in-page MJPEG, NATS
-  frames, RTSP); the camera MUST NOT be opened more than once.
+- **R-123** *(Withdrawn in v1.1.)* Previously required an embedded RTSP (RTP/JPEG) endpoint.
+  Removed — see §1.2. External viewers consume the `gorai.picarx.front.data` NATS frame
+  stream instead. The `rtsp` config block and `rtspServer` code have been deleted.
+- **R-124** The single physical capture MUST feed both consumers (in-page MJPEG, NATS
+  frames); the camera MUST NOT be opened more than once.
 
 ### 2.4 `teleop-ui` service (embedded web page)
 - **R-130** The service MUST serve exactly one control page from assets embedded in the Go
@@ -183,7 +211,7 @@ component reading the Pi camera.
 - **C-005** NEVER persist raw video frames in the JetStream audit stream — *Verified By*
   stream config review — *Stress* run video for 10 min; audit stream size stays bounded.
 - **C-006** NEVER open the physical camera more than once — *Verified By* camera component
-  review — *Stress* start MJPEG, NATS, and RTSP consumers simultaneously.
+  review — *Stress* start MJPEG and NATS consumers simultaneously.
 - **C-007** NEVER require a second process/web server for the UI — *Verified By* single
   `gorai run` produces the full experience.
 
@@ -214,16 +242,61 @@ component reading the Pi camera.
   *Then* the component stops the motors, publishes `…cliff.event`, and blocks drive.
 - **B-006** *Given* a second LAN machine with valid credentials, *When* it runs
   `gorai mesh schemas`, *Then* it lists all `picarx` and `camera` capabilities.
-- **B-007** *Given* the camera streaming, *When* a browser opens the page and VLC opens
-  `rtsp://<pi>:8554/front` simultaneously, *Then* both render live video from one capture.
+- **B-007** *Given* the camera streaming, *When* a browser opens the page and a second LAN
+  client subscribes to `gorai.picarx.front.data`, *Then* both receive live JPEG frames
+  from one capture.
 
 ## 6. Traceability to VISION
 
 | VISION section | Requirements |
 |---|---|
 | Capability Surface (resources/tools) | R-110…R-114 |
-| Video: two/three delivery paths | R-120…R-124, R-134 |
+| Video: two delivery paths (in-page MJPEG + NATS) | R-120…R-124, R-134 |
 | Web Control Page | R-130…R-138 |
 | Exposing the NATS bus | R-140…R-143 |
 | Safety at the capability | R-150…R-155, C-001…C-007 |
 | Success criteria | B-001…B-007 |
+
+---
+
+## 7. Build & Run notes (implementation)
+
+These notes record hard-won environment facts behind R-104, R-105, and R-120.
+
+### 7.1 Run the compiled binary, not `gorai run` (R-104)
+The stock `gorai` CLI runs a robot **in-process** from the components compiled into *that*
+binary — it does not recompile the project. Since `picarx`, `picam`, and `teleop-ui` live
+in this module, only a binary built from this module (`bin/picarx`) can register them.
+
+```bash
+make build            # gorai build robot.json -o bin/picarx --target <host> --tags rpicam
+make run              # builds, then ./bin/picarx run robot.json
+./bin/picarx run robot.json   # equivalent; note the "run" subcommand
+```
+
+`gorai run robot.json` fails with `type "picarx" model "picarx" not found in registry`.
+
+### 7.2 Build tags select the camera source (R-105, R-120)
+`gorai build` gained a `--tags` flag (added upstream in `gorai/cmd/gorai/commands/build.go`)
+that is forwarded to `go build`. The Makefile exposes it as `TAGS` (default `rpicam`):
+
+```bash
+make build                 # -tags rpicam  (Pi CSI camera — default)
+make build TAGS=v4l2       # -tags v4l2    (USB/UVC webcam)
+```
+
+- `components/camera/source_rpicam.go`  (`//go:build rpicam`) — spawns `rpicam-vid`.
+- `components/camera/source_v4l2.go`    (`//go:build v4l2 && !rpicam`) — USB webcam.
+- Neither tag → the default `sourceFactory` returns an error at start (fail loud).
+
+### 7.3 Why CSI cameras need `rpicam` on a Raspberry Pi 5 (R-120.1)
+The test rig's camera is an **OV5647** (PiCam) on a **Pi 5**. On Pi 5, `/dev/video0` is the
+`rp1-cfe` CSI front-end that emits **raw Bayer** and requires the libcamera media pipeline
+(CFE → `pispbe` ISP for debayer) driven via the V4L2 Request API. A plain V4L2 `open` +
+`VIDIOC_STREAMON` (the `v4l2` webcam path) fails with **`EINVAL`**. `rpicam-vid` drives that
+pipeline for us; the `rpicam` source shells out to it (`--codec mjpeg -o - -t 0 -n --flush`)
+and splits the MJPEG byte stream on JPEG SOI/EOI (`0xFFD8`…`0xFFD9`) markers into frames.
+Verified end-to-end: `GET /stream/front` delivers ~15 fps of valid JPEG.
+
+Prerequisite on the Pi: `rpicam-apps` installed (`/usr/bin/rpicam-vid`) and the camera
+enabled (`rpicam-hello --list-cameras` lists the sensor).

@@ -29,7 +29,6 @@ type Component struct {
 	subj    *subjects.Builder
 	capName string
 	src     Source
-	rtsp    *rtspServer // nil disables RTSP
 	cancel  context.CancelFunc
 	subs    []*nats.Subscription
 }
@@ -64,17 +63,6 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 		capName: name,
 		src:     src,
 	}
-	if raw, ok := conf["rtsp"].(map[string]any); ok {
-		if en, _ := raw["enabled"].(bool); en {
-			listen, _ := raw["listen"].(string)
-			path, _ := raw["path"].(string)
-			rt, err := newRTSPServer(listen, path)
-			if err != nil {
-				return nil, fmt.Errorf("rtsp: %w", err)
-			}
-			c.rtsp = rt
-		}
-	}
 	return c, nil
 }
 
@@ -106,7 +94,7 @@ func (c *Component) Start(ctx context.Context) error {
 		c.subs = append(c.subs, sub)
 	}
 
-	// single capture, fanned out: NATS publish (+ RTSP). I-005/C-006.
+	// single capture, published to NATS. I-005/C-006.
 	go func() {
 		for {
 			select {
@@ -117,9 +105,6 @@ func (c *Component) Start(ctx context.Context) error {
 					return
 				}
 				_ = c.nc.Publish(dataSubj, f.JPEG)
-				if c.rtsp != nil {
-					c.rtsp.push(f)
-				}
 			}
 		}
 	}()
@@ -132,9 +117,6 @@ func (c *Component) Close(context.Context) error {
 	}
 	for _, s := range c.subs {
 		_ = s.Unsubscribe()
-	}
-	if c.rtsp != nil {
-		_ = c.rtsp.close()
 	}
 	return c.src.Close()
 }

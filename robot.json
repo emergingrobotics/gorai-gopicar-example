@@ -16,8 +16,7 @@
       "type": "camera", "model": "picam", "name": "front",
       "depends_on": ["picarx"],
       "attributes": {
-        "device": "/dev/video0", "width": 640, "height": 480, "fps": 15, "jpeg_quality": 70,
-        "rtsp": { "enabled": true, "listen": ":8554", "path": "/front" }
+        "device": "/dev/video0", "width": 640, "height": 480, "fps": 15, "jpeg_quality": 70
       }
     }
   ],
