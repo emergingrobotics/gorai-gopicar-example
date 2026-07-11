@@ -22,6 +22,9 @@ func (c *Component) Start(ctx context.Context) error {
 	c.serveCommand(ctx, "steer", func(ctx context.Context, a map[string]any) map[string]any {
 		return c.ctl.steer(ctx, num(a, "angle"))
 	})
+	c.serveCommand(ctx, "spin", func(ctx context.Context, a map[string]any) map[string]any {
+		return c.ctl.spin(ctx, num(a, "rate"))
+	})
 	c.serveCommand(ctx, "campan", func(ctx context.Context, a map[string]any) map[string]any {
 		return c.ctl.campan(ctx, num(a, "angle"))
 	})

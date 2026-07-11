@@ -26,6 +26,7 @@ func allSchemas() []mesh.SchemaDescriptor {
 	}
 	add("gorai.picarx.drive.command", "drive throttle -100..100", obj(map[string]any{"throttle": numProp}, "throttle"))
 	add("gorai.picarx.steer.command", "steer angle deg", obj(map[string]any{"angle": numProp}, "angle"))
+	add("gorai.picarx.spin.command", "spin in place rate -100..100 (>0 right)", obj(map[string]any{"rate": numProp}, "rate"))
 	add("gorai.picarx.campan.command", "camera pan deg", obj(map[string]any{"angle": numProp}, "angle"))
 	add("gorai.picarx.camtilt.command", "camera tilt deg", obj(map[string]any{"angle": numProp}, "angle"))
 	add("gorai.picarx.estop.command", "engage/clear e-stop", obj(map[string]any{"clear": map[string]any{"type": "boolean"}}))

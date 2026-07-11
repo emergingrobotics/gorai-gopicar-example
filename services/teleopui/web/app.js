@@ -85,6 +85,21 @@ function softStop() {
   apply("drive", 0);
 }
 
+// Spin in place (differential): dir +1 = right, -1 = left. Overrides driving —
+// suspends the throttle cruise so it can't fight the spin — and is kept alive by
+// the watchdog loop while the key is held. Stops on release.
+const SPIN_RATE = 60;
+function startSpin(dir) {
+  delete held.drive;          // suspend forward cruise; spin drives the motors itself
+  el("throttle").value = 0;   // reflect that drive is suspended
+  held.spin = dir * SPIN_RATE;
+  post("spin", held.spin);
+}
+function stopSpin() {
+  delete held.spin;
+  post("spin", 0);
+}
+
 // Quit: stop the whole robot process from the GUI (graceful shutdown -> motors
 // stopped, camera released). Confirmed so it can't fire by accident.
 el("quit").addEventListener("click", () => {
@@ -95,12 +110,27 @@ el("quit").addEventListener("click", () => {
     .catch(() => {});
 });
 
+// Proximity stop distance (cm), settable at runtime. On change, push it to the
+// component and echo the accepted value; querying (cm<=0) reads the current value
+// back so the input stays in sync with the robot (e.g. after reconnect).
+const proxInput = el("proxcm");
+const proxThreshold = () => +proxInput?.value || 10;
+proxInput?.addEventListener("change", () => {
+  post("proximity", proxThreshold()).then((r) => {
+    if (r && typeof r.cm === "number") { proxInput.value = r.cm; setStatus("stop distance: " + r.cm + " cm", false); }
+  });
+});
+function syncProx() {
+  post("proximity", 0).then((r) => { if (r && typeof r.cm === "number") proxInput.value = r.cm; });
+}
+
 // Keyboard controls (active alongside the sliders, which track them visually):
 //   Arrow Up/Down            throttle up/down        (steps and HOLDS the speed)
 //   Arrow Left/Right         steer left/right        (springs to centre on release)
 //   Shift + Arrow Up/Down    camera tilt up/down      (steps and holds)
 //   Shift + Arrow Left/Right camera pan left/right    (steps and holds)
 //   C                        centre everything (camera pan + tilt AND steering to 0)
+//   R / L                    spin in place right / left (overrides driving)
 //   Space                    stop the motors (no latch — drive again right away)
 //   X                        e-stop (latches; clear with the on-screen button)
 //   W/A/S/D                  mirror the arrows for throttle/steer (R-136)
@@ -113,6 +143,8 @@ addEventListener("keydown", (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (key === "x") { e.preventDefault(); setEstop(true); return; }
   if (key === "c") { e.preventDefault(); apply("campan", 0); apply("camtilt", 0); apply("steer", 0); return; }
+  if (key === "r") { e.preventDefault(); if (!e.repeat) startSpin(1); return; }  // spin right
+  if (key === "l") { e.preventDefault(); if (!e.repeat) startSpin(-1); return; } // spin left
 
   const v = VKEYS[key];
   if (v !== undefined) {
@@ -136,6 +168,7 @@ addEventListener("keydown", (e) => {
 // or released mid-hold (releasing a Shift+Left pan just re-centres already-0 steer).
 addEventListener("keyup", (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (key === "r" || key === "l") { stopSpin(); return; }
   if (key in HKEYS) apply("steer", 0);
 });
 
@@ -154,9 +187,9 @@ function handleTelemetry(ev) {
     set("distance", d.cm);
     // Obstacle within the stop zone: kill the cruise throttle so it doesn't keep
     // driving into it. The component refuses forward until clear; reverse is fine.
-    if (typeof d.cm === "number" && d.cm >= 0 && d.cm < 5 && +el("throttle").value > 0) {
+    if (typeof d.cm === "number" && d.cm >= 0 && d.cm < proxThreshold() && +el("throttle").value > 0) {
       apply("drive", 0);
-      setStatus("obstacle <5cm — throttle zeroed; reverse to back away", true);
+      setStatus("obstacle <" + proxThreshold() + "cm — throttle zeroed; reverse to back away", true);
     }
   }
   if (d.cap === "grayscale") set("grayscale", (d.adc || []).join(","));
@@ -186,9 +219,11 @@ el("feed")?.addEventListener("error", () => setTimeout(reloadFeed, 1000));
 // without a page refresh. Backoff grows to 5s and resets on a successful open.
 let ws, wsBackoff = 500;
 function connectWS() {
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  // Protocol-aware: wss:// when the page is served over HTTPS, ws:// otherwise.
+  const scheme = location.protocol === "https:" ? "wss" : "ws";
+  ws = new WebSocket(`${scheme}://${location.host}/ws`);
   ws.onmessage = handleTelemetry;
-  ws.onopen = () => { wsBackoff = 500; setStatus(""); reloadFeed(); };
+  ws.onopen = () => { wsBackoff = 500; setStatus(""); reloadFeed(); syncProx(); };
   ws.onclose = () => {
     setStatus("disconnected — reconnecting…", true);
     setTimeout(connectWS, wsBackoff);

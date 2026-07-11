@@ -16,6 +16,7 @@ type Device interface {
 	SetCamTilt(context.Context, float64) error
 	Forward(context.Context, float64) error
 	Backward(context.Context, float64) error
+	Spin(context.Context, float64) error
 	Stop(context.Context) error
 	Battery(context.Context) (float64, error)
 	Grayscale(context.Context) ([3]int, error)
@@ -50,7 +51,7 @@ type controller struct {
 	cliff         bool
 	cliffClear    int // consecutive clear cliff readings; cliff clears after cliffClearPolls
 	obstacle      bool
-	obstacleClear int // consecutive clear distance readings; obstacle clears after cliffClearPolls
+	obstacleClear int     // consecutive clear distance readings; obstacle clears after cliffClearPolls
 	proxCM        float64 // forward-obstacle stop distance in cm (runtime-settable)
 	moving        bool
 	lastDrive     time.Time
@@ -156,6 +157,28 @@ func (c *controller) campan(ctx context.Context, angle float64) map[string]any {
 }
 func (c *controller) camtilt(ctx context.Context, angle float64) map[string]any {
 	return c.servo(ctx, angle, c.lim.CamTiltMaxDeg, c.dev.SetCamTilt)
+}
+
+// spin rotates the car in place (rate>0 right, <0 left), overriding any drive so
+// it works even while moving. Watchdog-protected like drive. Refused while
+// e-stopped. C-002 clamps the rate.
+func (c *controller) spin(ctx context.Context, rate float64) map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.estopped {
+		return failResp("estop_latched", "e-stop engaged; send estop.command {clear:true}")
+	}
+	r := clamp(rate, -100, 100)
+	if err := c.dev.Spin(ctx, r); err != nil {
+		return failResp("mcu_unavailable", err.Error())
+	}
+	c.moving = r != 0
+	c.lastDrive = c.clock()
+	resp := okResp()
+	if r != rate {
+		resp["clamped"] = r
+	}
+	return resp
 }
 
 // estop engages (clear=false) or clears (clear=true) the latch. C-004.

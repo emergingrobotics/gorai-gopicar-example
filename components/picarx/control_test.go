@@ -10,9 +10,9 @@ import (
 
 // stubDev records calls and lets tests force errors. It satisfies Device.
 type stubDev struct {
-	fwd, back, stop            int
-	lastFwd, lastBack, lastDir float64
-	err                        error
+	fwd, back, stop, spin                int
+	lastFwd, lastBack, lastDir, lastSpin float64
+	err                                  error
 }
 
 func (s *stubDev) SetDir(_ context.Context, d float64) error  { s.lastDir = d; return s.err }
@@ -24,6 +24,7 @@ func (s *stubDev) Backward(_ context.Context, p float64) error {
 	s.lastBack = p
 	return s.err
 }
+func (s *stubDev) Spin(_ context.Context, p float64) error   { s.spin++; s.lastSpin = p; return s.err }
 func (s *stubDev) Stop(context.Context) error                { s.stop++; return s.err }
 func (s *stubDev) Battery(context.Context) (float64, error)  { return 7.4, nil }
 func (s *stubDev) Grayscale(context.Context) ([3]int, error) { return [3]int{}, nil }
@@ -156,6 +157,23 @@ func TestProximityInterlock(t *testing.T) {
 	}
 	if r := c.drive(context.Background(), 20); r["ok"] != true {
 		t.Fatalf("forward should resume after path stably clear, got %v", r)
+	}
+}
+
+// Spin drives the rear motors in opposite directions, clamps, and is refused
+// while e-stopped.
+func TestSpin(t *testing.T) {
+	d := &stubDev{}
+	c := newController(d, testLim, [3]int{}, time.Now)
+	if r := c.spin(context.Background(), 60); r["ok"] != true || d.spin != 1 || d.lastSpin != 60 {
+		t.Fatalf("spin right: resp=%v spin=%d last=%v", r, d.spin, d.lastSpin)
+	}
+	if r := c.spin(context.Background(), 200); r["clamped"] != 100.0 || d.lastSpin != 100 {
+		t.Fatalf("spin must clamp to 100, resp=%v last=%v", r, d.lastSpin)
+	}
+	c.estop(context.Background(), false)
+	if r := c.spin(context.Background(), 60); r["error"] != "estop_latched" {
+		t.Fatalf("spin while e-stopped must fail, got %v", r)
 	}
 }
 
