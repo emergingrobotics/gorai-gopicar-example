@@ -9,7 +9,7 @@
       "attributes": {
         "calibration": "calibration.json",
         "steer_max_deg": 30, "campan_max_deg": 80, "camtilt_max_deg": 65,
-        "deadband": 5, "watchdog_ms": 500, "grayscale_ref": [1000, 1000, 1000]
+        "deadband": 5, "watchdog_ms": 500, "grayscale_ref": [100, 100, 100]
       }
     },
     {

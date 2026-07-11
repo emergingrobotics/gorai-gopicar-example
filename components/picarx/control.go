@@ -44,12 +44,19 @@ type controller struct {
 	clock   func() time.Time
 	window  time.Duration
 
-	mu        sync.Mutex
-	estopped  bool
-	cliff     bool
-	moving    bool
-	lastDrive time.Time
+	mu         sync.Mutex
+	estopped   bool
+	cliff      bool
+	cliffClear int // consecutive clear readings; cliff clears after cliffClearPolls
+	moving     bool
+	lastDrive  time.Time
 }
+
+// cliffClearPolls is how many consecutive clear cliff readings are required
+// before forward drive is re-enabled. At the ~100ms cliff poll this debounces a
+// reading that flickers while the car teeters at an edge, which would otherwise
+// briefly re-allow forward and let the car inch over. C-004.
+const cliffClearPolls = 3
 
 func newController(dev Device, lim Limits, grayRef [3]int, clock func() time.Time) *controller {
 	return &controller{dev: dev, lim: lim, grayRef: grayRef, clock: clock, window: 500 * time.Millisecond}
@@ -77,10 +84,14 @@ func (c *controller) drive(ctx context.Context, throttle float64) map[string]any
 	if c.estopped {
 		return failResp("estop_latched", "e-stop engaged; send estop.command {clear:true}")
 	}
-	if c.cliff {
-		return failResp("cliff_blocked", "cliff detected; drive blocked")
-	}
 	clamped := clamp(throttle, -100, 100)
+	// At a cliff, refuse FORWARD and force a stop, but allow stop/reverse so the
+	// operator can back away from the edge (R-154, C-004).
+	if c.cliff && clamped > c.lim.DriveDeadband {
+		c.moving = false
+		_ = c.dev.Stop(ctx)
+		return failResp("cliff_blocked", "cliff detected; forward blocked — reverse to back away")
+	}
 	var err error
 	switch {
 	case clamped > c.lim.DriveDeadband:
@@ -145,15 +156,26 @@ func (c *controller) estop(ctx context.Context, clear bool) map[string]any {
 }
 
 // updateCliff records the latest cliff reading and returns true on a rising edge
-// (which stops the motors). C-004.
+// (which stops the motors). The cliff state latches on detection and clears only
+// after cliffClearPolls consecutive clear readings, so a reading that flickers at
+// the edge cannot momentarily re-enable forward drive. C-004.
 func (c *controller) updateCliff(ctx context.Context, detected bool) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	rising := detected && !c.cliff
-	c.cliff = detected
-	if rising {
-		c.moving = false
-		_ = c.dev.Stop(ctx)
+	if detected {
+		c.cliff = true
+		c.cliffClear = 0
+		if rising {
+			c.moving = false
+			_ = c.dev.Stop(ctx)
+		}
+	} else if c.cliff {
+		c.cliffClear++
+		if c.cliffClear >= cliffClearPolls {
+			c.cliff = false
+			c.cliffClear = 0
+		}
 	}
 	return rising
 }

@@ -3,5 +3,5 @@
   "pan":   { "trim": -11, "dir": -1, "min": -80, "max": 80 },
   "tilt":  { "trim": 25, "dir": -1, "min": -40, "max": 85 },
   "left_motor":  { "scale": 1, "invert": false },
-  "right_motor": { "scale": 1, "invert": false }
+  "right_motor": { "scale": 1, "invert": true }
 }

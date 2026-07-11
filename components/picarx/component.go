@@ -6,6 +6,9 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/signal"
+	"sync"
+	"syscall"
 	"time"
 
 	gopx "github.com/emergingrobotics/gopicar/pkg/picarx"
@@ -30,16 +33,17 @@ func init() {
 // Component is the picarx capability node: it owns the single gopicar handle and
 // serves resources/tools over NATS with safety enforced in its controller.
 type Component struct {
-	name    resource.Name
-	nc      *nats.Conn
-	log     *slog.Logger
-	robotID string
-	subj    *subjects.Builder
-	px      *gopx.PiCarX
-	ctl     *controller
-	grayRef [3]int
-	cancel  context.CancelFunc
-	subs    []*nats.Subscription
+	name     resource.Name
+	nc       *nats.Conn
+	log      *slog.Logger
+	robotID  string
+	subj     *subjects.Builder
+	px       *gopx.PiCarX
+	ctl      *controller
+	grayRef  [3]int
+	cancel   context.CancelFunc
+	subs     []*nats.Subscription
+	stopOnce sync.Once
 }
 
 func parseConfig(conf registry.Config) (Limits, [3]int, string, time.Duration) {
@@ -106,7 +110,7 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 	ctl := newController(px, lim, ref, time.Now)
 	ctl.window = win
 
-	return &Component{
+	comp := &Component{
 		name:    resource.NewComponentName("gorai", "picarx", name),
 		nc:      nc,
 		log:     log,
@@ -115,7 +119,44 @@ func New(ctx context.Context, deps registry.Dependencies, conf registry.Config) 
 		px:      px,
 		ctl:     ctl,
 		grayRef: ref,
-	}, nil
+	}
+	comp.installExitHandler()
+	return comp, nil
+}
+
+// installExitHandler guarantees the motors are cut and the HAT is reset on
+// process exit. The gorai runtime also traps SIGINT/SIGTERM for graceful
+// shutdown; signal.Notify fans out to both, so this fires an immediate hard stop
+// the instant Ctrl-C/SIGTERM arrives, without waiting for the shutdown sequence
+// to unwind to this component's Close. Cannot cover SIGKILL (uncatchable).
+func (c *Component) installExitHandler() {
+	sigCh := make(chan os.Signal, 1)
+	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	go func() {
+		<-sigCh
+		c.hardStop()
+	}()
+}
+
+// hardStop cuts all motion and hard-resets the HAT/MCU so no PWM (motor or servo)
+// stays latched after we exit. Runs at most once (Close and the signal handler
+// both call it). Best-effort with a short independent timeout so a wedged bus
+// cannot block exit.
+func (c *Component) hardStop() {
+	c.stopOnce.Do(func() {
+		if c.px == nil {
+			return
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		c.log.Warn("picarx hard stop: cutting motors and resetting HAT")
+		if err := c.px.Stop(ctx); err != nil {
+			c.log.Warn("hard stop: motor stop failed", "err", err)
+		}
+		if err := c.px.Reset(ctx); err != nil {
+			c.log.Warn("hard stop: HAT reset failed", "err", err)
+		}
+	})
 }
 
 func getConn(deps registry.Dependencies) (*nats.Conn, error) {
@@ -157,6 +198,7 @@ func (c *Component) Close(context.Context) error {
 		_ = s.Unsubscribe()
 	}
 	if c.px != nil {
+		c.hardStop() // stop motors + reset HAT BEFORE releasing the bus/GPIO
 		return c.px.Close()
 	}
 	return nil

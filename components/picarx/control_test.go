@@ -103,14 +103,26 @@ func TestCliffInterlock(t *testing.T) {
 		t.Fatalf("rising edge must fire+Stop, fired=%v stop=%d", fired, d.stop)
 	}
 	if r := c.drive(context.Background(), 20); r["error"] != "cliff_blocked" {
-		t.Fatalf("drive over cliff must fail cliff_blocked, got %v", r)
+		t.Fatalf("drive forward over cliff must fail cliff_blocked, got %v", r)
+	}
+	// Reverse MUST be allowed while at a cliff so the operator can back away.
+	if r := c.drive(context.Background(), -20); r["ok"] != true {
+		t.Fatalf("reverse while at cliff must succeed, got %v", r)
 	}
 	if c.updateCliff(context.Background(), true) {
 		t.Fatalf("no re-fire while still detected")
 	}
-	c.updateCliff(context.Background(), false) // clear
+	// A single clear reading must NOT re-enable forward (debounce); only after
+	// cliffClearPolls consecutive clears.
+	c.updateCliff(context.Background(), false)
+	if r := c.drive(context.Background(), 20); r["error"] != "cliff_blocked" {
+		t.Fatalf("one clear reading must not re-enable forward, got %v", r)
+	}
+	for i := 0; i < cliffClearPolls; i++ {
+		c.updateCliff(context.Background(), false)
+	}
 	if r := c.drive(context.Background(), 20); r["ok"] != true {
-		t.Fatalf("drive after cliff clears should succeed, got %v", r)
+		t.Fatalf("drive after cliff fully clears should succeed, got %v", r)
 	}
 }
 

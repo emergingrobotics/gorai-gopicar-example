@@ -144,6 +144,15 @@ ws.onmessage = (ev) => {
   if (d.cap === "distance") set("distance", d.cm);
   if (d.cap === "grayscale") set("grayscale", (d.adc || []).join(","));
   if (d.cap === "line") set("line", (d.line || []).join(","));
-  if (d.cap === "cliff") { const e = el("cliff"); e.textContent = d.cliff; e.className = d.cliff ? "alarm" : ""; }
+  if (d.cap === "cliff") {
+    const e = el("cliff"); e.textContent = d.cliff; e.className = d.cliff ? "alarm" : "";
+    // Cliff detected: kill the cruise throttle so the held forward value doesn't
+    // keep driving into the edge. Only zero forward — leave reverse so the
+    // operator can back away (the component refuses forward until clear anyway).
+    if (d.cliff && +el("throttle").value > 0) {
+      apply("drive", 0);
+      setStatus("cliff detected — throttle zeroed; reverse to back away", true);
+    }
+  }
   if (d.cap === "sysinfo") set("sysinfo", d.fw);
 };
