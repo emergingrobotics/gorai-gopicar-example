@@ -9,11 +9,16 @@ import (
 // auditSubjects lists exactly what the audit stream captures. Raw video
 // (front.data) is deliberately excluded (C-005, R-155): we keep every command
 // and scalar reading, not every frame.
+//
+// Commands are audited via the dedicated gorai.<robot>.audit.command record
+// (published by serveCommand), NOT the live *.command subject, and *.state is not
+// captured either. Both are core NATS request/reply subjects: a JetStream-covered
+// request subject makes JetStream ACK the caller's reply inbox and race the real
+// handler's response, so the caller sees a PubAck instead of the tool reply.
 func auditSubjects(robotID string) []string {
 	return []string{
-		fmt.Sprintf("gorai.%s.*.command", robotID),
+		fmt.Sprintf("gorai.%s.audit.command", robotID),
 		fmt.Sprintf("gorai.%s.*.event", robotID),
-		fmt.Sprintf("gorai.%s.*.state", robotID),
 		fmt.Sprintf("gorai.%s.battery.data", robotID),
 		fmt.Sprintf("gorai.%s.distance.data", robotID),
 		fmt.Sprintf("gorai.%s.grayscale.data", robotID),

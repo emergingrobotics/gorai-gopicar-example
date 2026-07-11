@@ -8,5 +8,7 @@ main { display: grid; gap: 1rem; max-width: 720px; margin: 1rem auto; padding: 0
 #controls label { display: grid; }
 #stop { padding: 1rem; font-weight: bold; background: #c0392b; color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
 #stop.engaged { background: #e67e22; }
+#quit { padding: .5rem; font-weight: bold; background: #555; color: #fff; border: 0; border-radius: 8px; cursor: pointer; }
 #keys { margin: 0; font-size: .8rem; opacity: .75; text-align: center; }
+#status { margin: 0; font-size: .85rem; min-height: 1.2em; text-align: center; }
 .alarm { color: #c0392b; font-weight: bold; }

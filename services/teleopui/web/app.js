@@ -1,17 +1,31 @@
 // The page is a thin front-end: it POSTs control events and renders telemetry
-// pushed over the WebSocket. It never talks to NATS directly (C-001).
+// pushed over the WebSocket. It never talks to NATS directly (C-001). The teleop-ui
+// service translates each event to a NATS request on gorai.picarx.<cap>.command.
+const el = (id) => document.getElementById(id);
+const clamp = (s, v) => Math.max(+s.min, Math.min(+s.max, v));
+
+// Show the reason a command was refused (e.g. estop_latched, cliff_blocked) so the
+// controls never fail silently.
+const setStatus = (msg, bad) => {
+  const e = el("status");
+  if (e) { e.textContent = msg || ""; e.className = bad ? "alarm" : ""; }
+};
+
+// post sends a control event and reports the tool's typed reply: on {ok:false}
+// it surfaces the error; on success it clears any stale error.
 const post = (t, v) => fetch("/control", {
   method: "POST", headers: { "Content-Type": "application/json" },
   body: JSON.stringify({ t, v }),
+}).then((r) => r.json()).then((res) => {
+  if (res && res.ok === false) setStatus(`${t} refused: ${res.error || "error"}`, true);
+  else setStatus("");
+  return res;
 }).catch(() => {});
 
 // Watchdog keep-alive: while a drive/steer input is engaged, re-send on interval
 // so the component watchdog (C-003) is satisfied only while an operator is here.
 let held = {};
 setInterval(() => { for (const t of Object.keys(held)) post(t, held[t]); }, 200);
-
-const el = (id) => document.getElementById(id);
-const clamp = (s, v) => Math.max(+s.min, Math.min(+s.max, v));
 
 // Control channels: which slider they drive, whether they spring back to centre
 // on release (steer only) or hold position (throttle + camera), and the keyboard
@@ -62,6 +76,16 @@ function setEstop(on) {
   b.classList.toggle("engaged", on);
 }
 el("stop").addEventListener("click", () => setEstop(!estopped));
+
+// Quit: stop the whole robot process from the GUI (graceful shutdown -> motors
+// stopped, camera released). Confirmed so it can't fire by accident.
+el("quit").addEventListener("click", () => {
+  if (!confirm("Shut down the robot?")) return;
+  held = {};
+  fetch("/quit", { method: "POST" })
+    .then(() => setStatus("robot shutting down…", false))
+    .catch(() => {});
+});
 
 // Keyboard controls (active alongside the sliders, which track them visually):
 //   Arrow Up/Down            throttle up/down        (steps and HOLDS the speed)

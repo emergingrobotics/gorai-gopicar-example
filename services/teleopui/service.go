@@ -9,6 +9,8 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
+	"syscall"
 	"time"
 
 	"github.com/emergingrobotics/gorai/pkg/dashboard"
@@ -111,6 +113,28 @@ func (s *Service) handleControl(w http.ResponseWriter, r *http.Request) {
 	_, _ = w.Write(msg.Data)
 }
 
+// handleQuit lets the operator stop the whole robot from the GUI. It signals the
+// process with SIGTERM so the normal graceful shutdown runs (motors stopped, camera
+// released, NATS closed) rather than a hard exit.
+func (s *Service) handleQuit(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "POST only", http.StatusMethodNotAllowed)
+		return
+	}
+	s.log.Info("shutdown requested from teleop-ui GUI")
+	w.Header().Set("Content-Type", "application/json")
+	_, _ = w.Write([]byte(`{"ok":true,"msg":"shutting down"}`))
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
+	go func() {
+		time.Sleep(150 * time.Millisecond) // let the response reach the browser first
+		if p, err := os.FindProcess(os.Getpid()); err == nil {
+			_ = p.Signal(syscall.SIGTERM)
+		}
+	}()
+}
+
 func (s *Service) Start(ctx context.Context) error {
 	ctx, s.cancel = context.WithCancel(ctx)
 
@@ -127,6 +151,7 @@ func (s *Service) Start(ctx context.Context) error {
 	mux.HandleFunc("/stream/front", mjpegHandler(s.nc, fmt.Sprintf("gorai.%s.%s.data", s.robotID, s.cameraCap)))
 	mux.HandleFunc("/ws", s.hub.HandleWebSocket)
 	mux.HandleFunc("/control", s.handleControl)
+	mux.HandleFunc("/quit", s.handleQuit)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/" {
 			http.NotFound(w, r)
@@ -200,7 +225,15 @@ func (s *Service) Close(ctx context.Context) error {
 		_ = sub.Unsubscribe()
 	}
 	if s.srv != nil {
-		return s.srv.Shutdown(ctx)
+		// The MJPEG stream and WebSocket are long-lived connections that never go
+		// idle, so a plain Shutdown() blocks for as long as a browser is open. That
+		// would wedge the whole robot's shutdown (Ctrl-C appears dead) and leave the
+		// motors running. Bound it, then force-close any streaming connections.
+		shutCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+		defer cancel()
+		if err := s.srv.Shutdown(shutCtx); err != nil {
+			return s.srv.Close()
+		}
 	}
 	return nil
 }

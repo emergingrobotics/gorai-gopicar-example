@@ -3,6 +3,7 @@ package picarx
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -60,6 +61,11 @@ func (c *Component) serveCommand(ctx context.Context, capability string, h func(
 		resp := h(ctx, args)
 		if b, err := json.Marshal(resp); err == nil {
 			_ = m.Respond(b)
+		}
+		// Audit the command + its reply on a dedicated subject the JetStream stream
+		// captures (R-155). Not the .command subject itself — see auditSubjects.
+		if b, err := json.Marshal(map[string]any{"cap": capability, "args": args, "resp": resp}); err == nil {
+			_ = c.nc.Publish(fmt.Sprintf("gorai.%s.audit.command", c.robotID), b)
 		}
 	})
 	if err != nil {

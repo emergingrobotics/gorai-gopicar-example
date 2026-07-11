@@ -10,9 +10,9 @@ func TestAuditStreamExcludesVideo(t *testing.T) {
 		}
 	}
 	want := map[string]bool{
-		"gorai.picarx.*.command":    false,
-		"gorai.picarx.*.event":      false,
-		"gorai.picarx.battery.data": false,
+		"gorai.picarx.audit.command": false,
+		"gorai.picarx.*.event":       false,
+		"gorai.picarx.battery.data":  false,
 	}
 	for _, s := range subjects {
 		if _, ok := want[s]; ok {
