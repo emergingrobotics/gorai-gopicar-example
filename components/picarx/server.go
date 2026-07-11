@@ -40,10 +40,32 @@ func (c *Component) Start(ctx context.Context) error {
 		c.log.Warn("audit stream setup failed", "err", err)
 	}
 
+	c.centerServos(ctx)
 	c.startSensors(ctx)
 	go c.watchdogLoop(ctx)
 	go c.cliffLoop(ctx)
 	return nil
+}
+
+// centerServos moves steering and the camera gimbal to neutral (0) at startup so
+// the robot always begins from a known pose (matches the GUI sliders, which
+// default to centre). Routed through the controller (same clamped path as the
+// tools) so it uses the injected device.
+func (c *Component) centerServos(ctx context.Context) {
+	servos := []struct {
+		name string
+		set  func(context.Context, float64) map[string]any
+	}{
+		{"steer", c.ctl.steer},
+		{"campan", c.ctl.campan},
+		{"camtilt", c.ctl.camtilt},
+	}
+	for _, s := range servos {
+		if r := s.set(ctx, 0); r["ok"] != true {
+			c.log.Warn("centre servo failed", "servo", s.name, "resp", r)
+		}
+	}
+	c.log.Info("servos centred")
 }
 
 func num(a map[string]any, key string) float64 {

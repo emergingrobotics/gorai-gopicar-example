@@ -2,9 +2,10 @@ ROBOT_CONFIG ?= robot.json
 BINARY_NAME  ?= picarx
 TARGET       ?= $(shell go env GOOS)/$(shell go env GOARCH)
 TAGS         ?= rpicam
+PREFIX       ?= $(HOME)/bin
 
 .DEFAULT_GOAL := help
-.PHONY: build build-arm64 run test test-hw validate clean deploy fmt vet check help
+.PHONY: build build-arm64 run install test test-hw validate clean deploy fmt vet check help
 
 build: ## Build standalone binary
 	gorai build $(ROBOT_CONFIG) -o bin/$(BINARY_NAME) --target $(TARGET) --tags $(TAGS)
@@ -14,6 +15,11 @@ build-arm64: ## Cross-compile for Raspberry Pi 64-bit
 
 run: build ## Build then run the standalone binary (with local components)
 	./bin/$(BINARY_NAME) run $(ROBOT_CONFIG)
+
+install: build ## Build then copy the binary to ~/bin (override with PREFIX=)
+	@mkdir -p $(PREFIX)
+	install -m 0755 bin/$(BINARY_NAME) $(PREFIX)/$(BINARY_NAME)
+	@echo "==> Installed $(PREFIX)/$(BINARY_NAME)"
 
 test: ## Fast hardware-free tests
 	go test ./...

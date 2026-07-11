@@ -100,7 +100,7 @@ el("quit").addEventListener("click", () => {
 //   Arrow Left/Right         steer left/right        (springs to centre on release)
 //   Shift + Arrow Up/Down    camera tilt up/down      (steps and holds)
 //   Shift + Arrow Left/Right camera pan left/right    (steps and holds)
-//   C                        centre the camera (pan + tilt to 0)
+//   C                        centre everything (camera pan + tilt AND steering to 0)
 //   Space                    stop the motors (no latch — drive again right away)
 //   X                        e-stop (latches; clear with the on-screen button)
 //   W/A/S/D                  mirror the arrows for throttle/steer (R-136)
@@ -112,7 +112,7 @@ addEventListener("keydown", (e) => {
 
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   if (key === "x") { e.preventDefault(); setEstop(true); return; }
-  if (key === "c") { e.preventDefault(); apply("campan", 0); apply("camtilt", 0); return; }
+  if (key === "c") { e.preventDefault(); apply("campan", 0); apply("camtilt", 0); apply("steer", 0); return; }
 
   const v = VKEYS[key];
   if (v !== undefined) {
@@ -146,8 +146,7 @@ addEventListener("blur", coast);
 document.addEventListener("visibilitychange", () => { if (document.hidden) coast(); });
 
 // Telemetry over WebSocket.
-const ws = new WebSocket(`ws://${location.host}/ws`);
-ws.onmessage = (ev) => {
+function handleTelemetry(ev) {
   const d = JSON.parse(ev.data);
   const set = (id, v) => { const e = el(id); if (v !== undefined) e.textContent = v; };
   if (d.cap === "battery") set("battery", d.volts?.toFixed?.(2));
@@ -173,4 +172,28 @@ ws.onmessage = (ev) => {
     }
   }
   if (d.cap === "sysinfo") set("sysinfo", d.fw);
-};
+}
+
+// Reload the MJPEG feed (cache-busted) so it reconnects to a fresh stream after
+// the robot restarts.
+function reloadFeed() {
+  const f = el("feed");
+  if (f) f.src = "/stream/front?t=" + Date.now();
+}
+el("feed")?.addEventListener("error", () => setTimeout(reloadFeed, 1000));
+
+// Auto-reconnecting telemetry socket: a robot restart or network blip recovers
+// without a page refresh. Backoff grows to 5s and resets on a successful open.
+let ws, wsBackoff = 500;
+function connectWS() {
+  ws = new WebSocket(`ws://${location.host}/ws`);
+  ws.onmessage = handleTelemetry;
+  ws.onopen = () => { wsBackoff = 500; setStatus(""); reloadFeed(); };
+  ws.onclose = () => {
+    setStatus("disconnected — reconnecting…", true);
+    setTimeout(connectWS, wsBackoff);
+    wsBackoff = Math.min(wsBackoff * 2, 5000);
+  };
+  ws.onerror = () => { try { ws.close(); } catch (_) {} };
+}
+connectWS();
