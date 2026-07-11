@@ -1,7 +1,7 @@
 {
   "version": "2",
   "robot": { "name": "picarx", "description": "Teleoperable PiCar-X GoRAI robot" },
-  "nats": { "url": "nats://127.0.0.1:4222", "jetstream": true },
+  "nats": { "url": "nats://127.0.0.1:4222", "listen": "0.0.0.0:4222", "jetstream": true },
   "dashboard": { "enabled": false },
   "components": [
     {

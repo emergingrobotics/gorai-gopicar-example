@@ -163,16 +163,27 @@ Because the robot contains custom components, it runs from its **own compiled bi
 
 ### 2.5 NATS bus exposure
 - **R-140** The NATS bus and the browser-serving HTTP listener MUST be reachable over the
-  Pi's Wi-Fi LAN, not only `localhost`. NOTE (verified, DESIGN §11): gorai derives the
-  embedded server's bind *and* its own client dial from the single `nats.url`; `0.0.0.0`
-  breaks the local dial, so LAN reach is achieved by setting `nats.url` to the Pi's routable
-  address/hostname, or by using an external `nats-server` (which R-141 requires anyway). The
-  `teleop-ui` HTTP listener binds `0.0.0.0` directly (its own `net.Listen`), so it is
-  LAN-reachable without this caveat.
+  Pi's Wi-Fi LAN, not only `localhost`. **IMPLEMENTED (2026-07-11):** gorai gates the embedded
+  server on `ShouldEmbedNATS()`, which only embeds when `nats.url` is *local* — a non-local
+  URL disables the embedded server (it assumes an external `nats-server`). So the bus is NOT
+  exposed merely by changing `nats.url` (every non-loopback URL fails with "no servers
+  available"). Instead a new **`nats.listen`** field (added to gorai `pkg/config` +
+  `pkg/robot`) sets the embedded server's bind address independently of the client dial: the
+  robot keeps `url: nats://127.0.0.1:4222` (so it embeds and dials locally) while
+  `listen: 0.0.0.0:4222` opens the server on all interfaces. Current `robot.json`:
+  `"nats": { "url": "nats://127.0.0.1:4222", "listen": "0.0.0.0:4222", "jetstream": true }`.
+  Verified: server binds `*:4222`, reachable at `nats://<pi-lan-ip>:4222`, loopback still
+  works. The `teleop-ui` HTTP listener binds `0.0.0.0` directly and was already LAN-reachable.
 - **R-141** Joining the mesh MUST require valid credentials for the `picarx` NATS account,
   implemented as **NKey/JWT accounts** (signed credentials); the credential set is the
   robot's authorization boundary and maps to the Composite Robot model. A relaxed/no-auth
   mode MAY be offered for trusted-bench testing but MUST NOT be the deployed default.
+  **⚠️ CURRENT STATE (2026-07-11): NOT MET — the LAN bus is exposed OPEN, no auth, no TLS**
+  (accepted for now as trusted-bench operation, R-140). Any host on the LAN can issue
+  actuator commands (drive, e-stop, spin) or read all telemetry. No firewall is active, so
+  `:4222` is reachable by any LAN host while the robot runs. Before deployment this MUST be
+  closed: external `nats-server` with NKey/JWT accounts, TLS via `nats.tls`, and/or a firewall
+  scoping `:4222`.
 - **R-142** With the exposed bus, a second machine on the LAN MUST be able to
   (a) list the `picarx` and `camera` capabilities via `gorai mesh services`/`schemas`, and
   (b) subscribe to `gorai.picarx.>` to observe the command/telemetry stream.

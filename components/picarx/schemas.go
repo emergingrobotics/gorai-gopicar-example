@@ -46,6 +46,9 @@ func (c *Component) registerSchemas(ctx context.Context) error {
 		return err
 	}
 	for _, s := range allSchemas() {
+		// RegisterSchema also auto-registers a discovery channel for capability
+		// subjects (gorai core, mesh.RegisterSchema) — so registering schemas is
+		// enough to be discoverable by `gorai mesh channels` and gorai-mcp.
 		if err := client.RegisterSchema(ctx, s); err != nil {
 			c.log.Warn("schema register failed", "name", s.Name, "err", err)
 		}
