@@ -29,10 +29,11 @@ type Device interface {
 
 // Limits are the mechanical/electrical bounds enforced before any hardware call.
 type Limits struct {
-	SteerMaxDeg   float64
-	CamPanMaxDeg  float64
-	CamTiltMaxDeg float64
-	DriveDeadband float64
+	SteerMaxDeg     float64
+	CamPanMaxDeg    float64
+	CamTiltMaxDeg   float64
+	DriveDeadband   float64
+	ProximityStopCM float64 // initial forward-obstacle stop distance (runtime-settable)
 }
 
 // controller owns all mutable safety state. Its handler methods are NATS-free so
@@ -50,6 +51,7 @@ type controller struct {
 	cliffClear    int // consecutive clear cliff readings; cliff clears after cliffClearPolls
 	obstacle      bool
 	obstacleClear int // consecutive clear distance readings; obstacle clears after cliffClearPolls
+	proxCM        float64 // forward-obstacle stop distance in cm (runtime-settable)
 	moving        bool
 	lastDrive     time.Time
 }
@@ -60,12 +62,18 @@ type controller struct {
 // which would otherwise briefly re-allow forward and let the car creep on. C-004.
 const cliffClearPolls = 3
 
-// proximityStopCM is the forward-obstacle threshold: a distance reading below
-// this (and non-negative; -1 means no echo) stops the car and blocks forward.
-const proximityStopCM = 5.0
+// defaultProximityCM is the forward-obstacle stop distance used when none is
+// configured. A distance reading below the current threshold (and non-negative;
+// -1 means no echo) stops the car and blocks forward. Runtime-settable via the
+// proximity tool.
+const defaultProximityCM = 10.0
 
 func newController(dev Device, lim Limits, grayRef [3]int, clock func() time.Time) *controller {
-	return &controller{dev: dev, lim: lim, grayRef: grayRef, clock: clock, window: 500 * time.Millisecond}
+	prox := lim.ProximityStopCM
+	if prox <= 0 {
+		prox = defaultProximityCM
+	}
+	return &controller{dev: dev, lim: lim, grayRef: grayRef, clock: clock, window: 500 * time.Millisecond, proxCM: prox}
 }
 
 func clamp(v, lo, hi float64) float64 {
@@ -101,7 +109,7 @@ func (c *controller) drive(ctx context.Context, throttle float64) map[string]any
 	if c.obstacle && clamped > c.lim.DriveDeadband {
 		c.moving = false
 		_ = c.dev.Stop(ctx)
-		return failResp("obstacle_blocked", "obstacle within 5cm; forward blocked — reverse to back away")
+		return failResp("obstacle_blocked", "obstacle within stop distance; forward blocked — reverse to back away")
 	}
 	var err error
 	switch {
@@ -198,7 +206,7 @@ func (c *controller) updateCliff(ctx context.Context, detected bool) bool {
 func (c *controller) updateProximity(ctx context.Context, cm float64) bool {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	tooClose := cm >= 0 && cm < proximityStopCM
+	tooClose := cm >= 0 && cm < c.proxCM
 	rising := tooClose && !c.obstacle
 	if tooClose {
 		c.obstacle = true
@@ -215,6 +223,24 @@ func (c *controller) updateProximity(ctx context.Context, cm float64) bool {
 		}
 	}
 	return rising
+}
+
+// setProximity updates the forward-obstacle stop distance (cm) at runtime.
+func (c *controller) setProximity(cm float64) map[string]any {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if cm <= 0 {
+		return failResp("out_of_range", "stop distance must be > 0 cm")
+	}
+	c.proxCM = cm
+	return map[string]any{"ok": true, "cm": cm}
+}
+
+// proximity returns the current forward-obstacle stop distance (cm).
+func (c *controller) proximity() float64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.proxCM
 }
 
 // tickWatchdog stops the car if it is moving and no drive command arrived within

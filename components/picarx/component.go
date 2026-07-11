@@ -54,10 +54,11 @@ func parseConfig(conf registry.Config) (Limits, [3]int, string, time.Duration) {
 		return def
 	}
 	lim := Limits{
-		SteerMaxDeg:   num("steer_max_deg", defaultSteerMaxDeg),
-		CamPanMaxDeg:  num("campan_max_deg", defaultCamPanMaxDeg),
-		CamTiltMaxDeg: num("camtilt_max_deg", defaultCamTiltMaxDeg),
-		DriveDeadband: num("deadband", defaultDeadband),
+		SteerMaxDeg:     num("steer_max_deg", defaultSteerMaxDeg),
+		CamPanMaxDeg:    num("campan_max_deg", defaultCamPanMaxDeg),
+		CamTiltMaxDeg:   num("camtilt_max_deg", defaultCamTiltMaxDeg),
+		DriveDeadband:   num("deadband", defaultDeadband),
+		ProximityStopCM: num("proximity_stop_cm", defaultProximityCM),
 	}
 	var ref [3]int
 	if raw, ok := conf["grayscale_ref"].([]any); ok && len(raw) == 3 {

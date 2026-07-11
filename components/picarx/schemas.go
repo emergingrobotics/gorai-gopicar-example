@@ -29,6 +29,7 @@ func allSchemas() []mesh.SchemaDescriptor {
 	add("gorai.picarx.campan.command", "camera pan deg", obj(map[string]any{"angle": numProp}, "angle"))
 	add("gorai.picarx.camtilt.command", "camera tilt deg", obj(map[string]any{"angle": numProp}, "angle"))
 	add("gorai.picarx.estop.command", "engage/clear e-stop", obj(map[string]any{"clear": map[string]any{"type": "boolean"}}))
+	add("gorai.picarx.proximity.command", "set forward stop distance cm (0 = query)", obj(map[string]any{"cm": numProp}))
 	add("gorai.picarx.battery.data", "pack voltage", obj(map[string]any{"volts": numProp}))
 	add("gorai.picarx.distance.data", "ultrasonic cm (-1 no echo)", obj(map[string]any{"cm": numProp}))
 	add("gorai.picarx.grayscale.data", "grayscale adc [L,M,R]", obj(map[string]any{"adc": map[string]any{"type": "array"}}))

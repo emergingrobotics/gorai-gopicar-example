@@ -32,6 +32,13 @@ func (c *Component) Start(ctx context.Context) error {
 		clear, _ := a["clear"].(bool)
 		return c.ctl.estop(ctx, clear)
 	})
+	// proximity: {cm>0} sets the forward-obstacle stop distance; otherwise reports it.
+	c.serveCommand(ctx, "proximity", func(ctx context.Context, a map[string]any) map[string]any {
+		if cm, ok := a["cm"].(float64); ok && cm > 0 {
+			return c.ctl.setProximity(cm)
+		}
+		return map[string]any{"ok": true, "cm": c.ctl.proximity()}
+	})
 
 	if err := c.registerSchemas(ctx); err != nil {
 		c.log.Warn("schema registration failed", "err", err)

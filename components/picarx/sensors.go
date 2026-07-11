@@ -26,6 +26,7 @@ func (c *Component) startSensors(ctx context.Context) {
 		{"grayscale", c.grayscalePayload},
 		{"line", c.linePayload},
 		{"cliff", c.cliffPayload},
+		{"proximity", c.proximityPayload},
 		{"sysinfo", c.sysinfoPayload},
 	}
 	for _, s := range states {
@@ -119,6 +120,10 @@ func (c *Component) linePayload(ctx context.Context) map[string]any {
 		return map[string]any{"error": err.Error()}
 	}
 	return map[string]any{"line": []bool{l[0], l[1], l[2]}}
+}
+
+func (c *Component) proximityPayload(ctx context.Context) map[string]any {
+	return map[string]any{"cm": c.ctl.proximity()}
 }
 
 func (c *Component) cliffPayload(ctx context.Context) map[string]any {
