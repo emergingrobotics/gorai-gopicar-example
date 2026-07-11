@@ -1,0 +1,24 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PiCar-X Teleop</title>
+<link rel="stylesheet" href="/static/style.css">
+<main>
+  <section id="video"><img id="feed" src="/stream/front" alt="camera feed"><div id="nofeed" hidden>no feed</div></section>
+  <section id="telemetry">
+    <div class="stat"><span>battery</span><b id="battery">--</b> V</div>
+    <div class="stat"><span>distance</span><b id="distance">--</b> cm</div>
+    <div class="stat"><span>grayscale</span><b id="grayscale">--</b></div>
+    <div class="stat"><span>line</span><b id="line">--</b></div>
+    <div class="stat"><span>cliff</span><b id="cliff">--</b></div>
+    <div class="stat"><span>system</span><b id="sysinfo">--</b></div>
+  </section>
+  <section id="controls">
+    <label>throttle <input id="throttle" type="range" min="-100" max="100" value="0"></label>
+    <label>steer <input id="steer" type="range" min="-30" max="30" value="0"></label>
+    <label>cam pan <input id="campan" type="range" min="-80" max="80" value="0"></label>
+    <label>cam tilt <input id="camtilt" type="range" min="-65" max="65" value="0"></label>
+    <button id="stop">STOP</button>
+  </section>
+</main>
+<script src="/static/app.js"></script>

@@ -1,0 +1,29 @@
+{
+  "version": "2",
+  "robot": { "name": "picarx", "description": "Teleoperable PiCar-X GoRAI robot" },
+  "nats": { "url": "nats://127.0.0.1:4222", "jetstream": true },
+  "dashboard": { "enabled": false },
+  "components": [
+    {
+      "type": "picarx", "model": "picarx", "name": "picarx",
+      "attributes": {
+        "calibration": "calibration.json",
+        "steer_max_deg": 30, "campan_max_deg": 80, "camtilt_max_deg": 65,
+        "deadband": 5, "watchdog_ms": 500, "grayscale_ref": [1000, 1000, 1000]
+      }
+    },
+    {
+      "type": "camera", "model": "picam", "name": "front",
+      "depends_on": ["picarx"],
+      "attributes": {
+        "device": "/dev/video0", "width": 640, "height": 480, "fps": 15, "jpeg_quality": 70,
+        "rtsp": { "enabled": true, "listen": ":8554", "path": "/front" }
+      }
+    }
+  ],
+  "services": [
+    { "type": "teleop-ui", "model": "teleop-ui", "name": "teleop",
+      "attributes": { "listen": "0.0.0.0:8080", "camera": "front" } }
+  ],
+  "discovery": { "enabled": false }
+}
