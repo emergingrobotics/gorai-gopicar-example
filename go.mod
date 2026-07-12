@@ -3,8 +3,8 @@ module github.com/emergingrobotics/gorai-picarx
 go 1.25.0
 
 require (
-	github.com/emergingrobotics/gopicar v0.0.0-00010101000000-000000000000
-	github.com/emergingrobotics/gorai v0.0.0
+	github.com/emergingrobotics/gopicar v0.1.1
+	github.com/emergingrobotics/gorai v0.2.4
 	github.com/nats-io/nats-server/v2 v2.12.6
 	github.com/nats-io/nats.go v1.49.0
 )
@@ -29,7 +29,3 @@ require (
 	golang.org/x/sys v0.46.0 // indirect
 	golang.org/x/time v0.15.0 // indirect
 )
-
-replace github.com/emergingrobotics/gorai => ../gorai
-
-replace github.com/emergingrobotics/gopicar => ../gopicar
